@@ -92,11 +92,12 @@
     gap: 10px;
   }
   /* 화면이 넓어질수록 열을 늘려 좌우 여백을 없앤다 */
-  @media (min-width: 640px)  { .grid { grid-template-columns: repeat(3, 1fr); } }
-  @media (min-width: 900px)  { .grid { grid-template-columns: repeat(4, 1fr); } }
-  @media (min-width: 1200px) { .grid { grid-template-columns: repeat(5, 1fr); } }
-  @media (min-width: 1500px) { .grid { grid-template-columns: repeat(6, 1fr); } }
-  @media (min-width: 1800px) { .grid { grid-template-columns: repeat(7, 1fr); } }
+  @media (min-width: 520px)  { .grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 680px)  { .grid { grid-template-columns: repeat(4, 1fr); } }
+  @media (min-width: 840px)  { .grid { grid-template-columns: repeat(5, 1fr); } }
+  @media (min-width: 1080px) { .grid { grid-template-columns: repeat(6, 1fr); } }
+  @media (min-width: 1340px) { .grid { grid-template-columns: repeat(7, 1fr); } }
+  @media (min-width: 1620px) { .grid { grid-template-columns: repeat(8, 1fr); } }
 
   /* 데스크톱: 입력·필터는 읽기 좋은 폭으로 모아두고, 카드 그리드만 꽉 채운다 */
   @media (min-width: 1000px) {
@@ -128,12 +129,13 @@
   }
   .card .ch { font-size: 11px; color: var(--dim); padding: 0 9px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card .stats {
-    font-size: 11px;
-    line-height: 1.6;
-    padding: 6px 9px;
+    font-size: 10.5px;
+    line-height: 1.55;
+    padding: 5px 8px;
     background: rgba(0, 0, 0, 0.45);
-    white-space: nowrap;
-    overflow: hidden;
+    /* 열이 많아 카드가 좁아져도 잘리지 않고 줄바꿈되게 한다 */
+    white-space: normal;
+    word-break: keep-all;
   }
   .card .stats.red { background: var(--red); }
   .card .stats.green { background: var(--green); }
@@ -252,6 +254,8 @@
           <option value="50">50개</option>
           <option value="100" selected>100개</option>
           <option value="150">150개</option>
+          <option value="250">250개</option>
+          <option value="400">400개</option>
         </select>
       </div>
       <label class="chk mt6"><input type="checkbox" id="incUnknown" checked> 국가 미상 포함</label>
@@ -385,22 +389,35 @@ async function loadChannel(chParam, maxCount, cutoffTs) {
   return fetchVideosByIds(ids);
 }
 
+// 국가 필터에 맞춰 검색 자체를 해당 지역 기준으로 돌린다.
+// (같은 100단위 비용으로 원하는 국가의 영상이 훨씬 많이 잡힌다)
+const SEARCH_HINT = {
+  us:       { regionCode: "US", relevanceLanguage: "en" },
+  high_cpm: { regionCode: "US", relevanceLanguage: "en" },
+  no_asia:  { regionCode: "US", relevanceLanguage: "en" },
+  kr:       { regionCode: "KR", relevanceLanguage: "ko" },
+};
+
 async function loadSearch(q, maxCount, cutoffTs) {
-  const ids = [];
+  const seen = new Set(); // 페이지 간 중복이 있어도 요청한 개수를 채운다
   let pageToken = "";
-  while (ids.length < maxCount) {
+  const hint = SEARCH_HINT[$("region").value] || {};
+  while (seen.size < maxCount) {
     const params = {
-      part: "id", q, type: "video", maxResults: 50,
+      part: "id", q, type: "video", maxResults: 50, ...hint,
       ...(pageToken ? { pageToken } : {}),
     };
     if (cutoffTs) params.publishedAfter = new Date(cutoffTs).toISOString();
     const data = await api("search", params, 100);
-    for (const it of data.items || []) ids.push(it.id.videoId);
+    for (const it of data.items || []) {
+      if (it.id && it.id.videoId) seen.add(it.id.videoId);
+      if (seen.size >= maxCount) break;
+    }
     pageToken = data.nextPageToken;
     if (!pageToken) break;
   }
-  if (!ids.length) throw new Error("검색 결과가 없습니다");
-  return fetchVideosByIds([...new Set(ids)]);
+  if (!seen.size) throw new Error("검색 결과가 없습니다");
+  return fetchVideosByIds([...seen]);
 }
 
 // ----- 국가 판정 -----
@@ -465,6 +482,17 @@ async function attachCountries(list) {
   }
 }
 
+// 아시아 중 한국·일본·싱가포르만 허용, 나머지 아시아는 어떤 필터에서도 표시하지 않음
+const ASIA_ALLOW = new Set(["KR", "JP", "SG"]);
+const BLOCK_LANGS = new Set([...ASIAN_LANGS].filter((l) => l !== "ko" && l !== "ja"));
+
+function isBlocked(r) {
+  const c = (r.country || "").toUpperCase();
+  if (c === "EN") return false;
+  if (c) return ASIA.has(c) && !ASIA_ALLOW.has(c);
+  return r.lang ? BLOCK_LANGS.has(r.lang) : false;
+}
+
 function isAsian(r) {
   if (r.country === "EN") return false;      // 영어권은 비아시아로 취급
   if (r.country) return ASIA.has(r.country);
@@ -515,18 +543,21 @@ function visibleRows() {
     comments: (r) => r.comments ?? -1, er: (r) => erOf(r) ?? -1,
     date: (r) => new Date(r.date || 0).getTime(),
   }[sortKey];
-  const list = rows.filter(passRegion);
+  const list = rows.filter((r) => !isBlocked(r) && passRegion(r));
   list.sort((a, b) => keyFn(b) - keyFn(a));
   return list;
 }
 
 function render() {
   const list = visibleRows();
-  const hidden = rows.length - list.length;
+  const blocked = rows.filter(isBlocked).length;
+  const filtered = rows.length - blocked - list.length;
   setStatus(
     `${list.length}개 표시` +
-    (hidden > 0 ? ` · 국가 필터로 ${hidden}개 제외됨` : "") +
-    (rows.length ? " · 정렬/필터를 바꾸면 즉시 반영됩니다" : "")
+    (rows.length ? ` (수집 ${rows.length}개` : "") +
+    (filtered > 0 ? ` · 국가필터 ${filtered}` : "") +
+    (blocked > 0 ? ` · 제외국가 ${blocked}` : "") +
+    (rows.length ? ")" : "")
   );
 
   const grid = $("grid");
