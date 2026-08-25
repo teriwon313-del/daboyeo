@@ -41,7 +41,7 @@
     color: transparent;
   }
   .quota { font-size: 12px; color: var(--dim); text-align: right; }
-  main { padding: 0 12px; max-width: 760px; margin: 0 auto; }
+  main { padding: 0 12px; max-width: 1840px; margin: 0 auto; }
 
   .box {
     background: var(--card);
@@ -91,7 +91,20 @@
     grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
-  @media (min-width: 640px) { .grid { grid-template-columns: 1fr 1fr 1fr; } }
+  /* 화면이 넓어질수록 열을 늘려 좌우 여백을 없앤다 */
+  @media (min-width: 640px)  { .grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 900px)  { .grid { grid-template-columns: repeat(4, 1fr); } }
+  @media (min-width: 1200px) { .grid { grid-template-columns: repeat(5, 1fr); } }
+  @media (min-width: 1500px) { .grid { grid-template-columns: repeat(6, 1fr); } }
+  @media (min-width: 1800px) { .grid { grid-template-columns: repeat(7, 1fr); } }
+
+  /* 데스크톱: 입력·필터는 읽기 좋은 폭으로 모아두고, 카드 그리드만 꽉 채운다 */
+  @media (min-width: 1000px) {
+    .box, #status { max-width: 1100px; margin-left: auto; margin-right: auto; }
+    #filters { display: flex; align-items: center; gap: 6px; }
+    #filters .row { margin-top: 0; flex: 1; }
+    #filters .chk { margin-top: 0; }
+  }
   .card {
     background: var(--card);
     border-radius: 12px;
