@@ -28,12 +28,12 @@
     padding-bottom: 40px;
   }
   header {
-    padding: 14px 16px 10px;
+    padding: 10px 12px 6px;
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  header h1 { font-size: 19px; margin: 0; flex: 1; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; }
   header h1 span {
     background: linear-gradient(135deg, var(--accent1), var(--accent2));
     -webkit-background-clip: text;
@@ -46,20 +46,30 @@
   .box {
     background: var(--card);
     border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 12px;
-    margin-bottom: 10px;
+    border-radius: 12px;
+    padding: 9px;
+    margin-bottom: 8px;
   }
-  .row { display: flex; gap: 8px; }
+  .row { display: flex; gap: 6px; }
   input, select, button {
     font-family: inherit;
-    font-size: 15px;
-    border-radius: 10px;
+    font-size: 13.5px;
+    border-radius: 9px;
     border: 1px solid var(--line);
     background: #101014;
     color: var(--text);
-    padding: 11px 12px;
+    padding: 8px 9px;
   }
+  #go { flex: 2; }
+  #filters.folded { display: none; }
+  .summary {
+    font-size: 12px;
+    color: var(--dim);
+    padding: 6px 2px 0;
+    display: none;
+  }
+  .summary.on { display: block; }
+  .mt6 { margin-top: 6px; }
   input { width: 100%; }
   input::placeholder { color: #63636c; }
   select { flex: 1; }
@@ -191,45 +201,48 @@
       <button class="btn-ghost" id="favBtn" title="현재 입력을 즐겨찾기로 저장">★ 저장</button>
     </div>
     <div class="chips" id="chips"></div>
-    <div class="row mt8">
-      <select id="period">
-        <option value="all">전체 기간</option>
-        <option value="7">최근 7일</option>
-        <option value="14">최근 14일</option>
-        <option value="30" selected>최근 30일</option>
-        <option value="90">최근 90일</option>
-        <option value="180">최근 180일</option>
-        <option value="365">최근 1년</option>
-      </select>
-      <select id="sort">
-        <option value="views">조회수순</option>
-        <option value="er">ER순</option>
-        <option value="likes">좋아요순</option>
-        <option value="comments">댓글순</option>
-        <option value="date" selected>최신순</option>
-      </select>
-    </div>
-    <div class="row mt8">
-      <select id="region">
-        <option value="all">모든 국가</option>
-        <option value="kr_us">한국 + 미국만</option>
-        <option value="no_asia">아시아 제외</option>
-        <option value="kr">한국만</option>
-        <option value="us">미국만</option>
-      </select>
-      <label class="chk"><input type="checkbox" id="incUnknown" checked> 미상 포함</label>
-    </div>
-    <div class="row mt8">
-      <select id="maxCount">
-        <option value="50">50개</option>
-        <option value="100" selected>100개</option>
-        <option value="150">150개</option>
-      </select>
-      <button class="btn-main" id="go" style="flex:2">조회</button>
+    <div class="row mt6">
+      <button class="btn-main" id="go">조회</button>
       <button class="btn-ghost" id="copy">URL 복사</button>
+      <button class="btn-ghost" id="fold" title="필터 접기/펴기">필터 ▾</button>
     </div>
-    <div class="hint">채널 조회 ≈ 할당량 4~8 · 검색어 조회 ≈ 102~105 (하루 한도 10,000).
-      국가는 채널 등록정보 기준이며, 비어 있으면 영상 언어로 추정하거나 '미상'으로 표시됩니다.</div>
+    <div class="summary" id="summary"></div>
+    <div id="filters">
+      <div class="row mt6">
+        <select id="period">
+          <option value="all">전체 기간</option>
+          <option value="7">최근 7일</option>
+          <option value="14">최근 14일</option>
+          <option value="30" selected>최근 30일</option>
+          <option value="90">최근 90일</option>
+          <option value="180">최근 180일</option>
+          <option value="365">최근 1년</option>
+        </select>
+        <select id="sort">
+          <option value="views">조회수순</option>
+          <option value="er">ER순</option>
+          <option value="likes">좋아요순</option>
+          <option value="comments">댓글순</option>
+          <option value="date" selected>최신순</option>
+        </select>
+      </div>
+      <div class="row mt6">
+        <select id="region">
+          <option value="all">모든 국가</option>
+          <option value="high_cpm">고CPM 국가</option>
+          <option value="kr_us">한국 + 미국</option>
+          <option value="no_asia">아시아 제외</option>
+          <option value="kr">한국만</option>
+          <option value="us">미국만</option>
+        </select>
+        <select id="maxCount">
+          <option value="50">50개</option>
+          <option value="100" selected>100개</option>
+          <option value="150">150개</option>
+        </select>
+      </div>
+      <label class="chk mt6"><input type="checkbox" id="incUnknown" checked> 국가 미상 포함</label>
+    </div>
   </div>
 
   <div id="status"></div>
@@ -392,7 +405,13 @@ const LANG_TO_COUNTRY = { ko: "KR", ja: "JP", zh: "CN", th: "TH", vi: "VN",
   id: "ID", ms: "MY", hi: "IN", tr: "TR", ar: "SA", he: "IL", fa: "IR" };
 const FLAG = { KR: "🇰🇷", US: "🇺🇸", JP: "🇯🇵", CN: "🇨🇳", TW: "🇹🇼", GB: "🇬🇧",
   IN: "🇮🇳", ID: "🇮🇩", VN: "🇻🇳", TH: "🇹🇭", PH: "🇵🇭", BR: "🇧🇷", DE: "🇩🇪",
-  FR: "🇫🇷", ES: "🇪🇸", CA: "🇨🇦", AU: "🇦🇺", RU: "🇷🇺", MX: "🇲🇽" };
+  FR: "🇫🇷", ES: "🇪🇸", CA: "🇨🇦", AU: "🇦🇺", RU: "🇷🇺", MX: "🇲🇽",
+  CH: "🇨🇭", NO: "🇳🇴", NZ: "🇳🇿", DK: "🇩🇰", SE: "🇸🇪", NL: "🇳🇱", IE: "🇮🇪" };
+
+// 국가별 평균 CPM(USD) — 고CPM 국가 필터 및 카드 표시에 사용
+const CPM = { US: 14.67, AU: 13.30, CH: 12.98, NO: 11.21, NZ: 10.21,
+  CA: 9.93, DE: 9.79, DK: 9.13, GB: 8.91 };
+const HIGH_CPM = new Set(Object.keys(CPM));
 
 // 채널 국가 캐시 (할당량 절약 — 기기에 영구 저장)
 let chCache = {};
@@ -445,6 +464,8 @@ function passRegion(r) {
   const unknown = !r.country;
   if (unknown) return $("incUnknown").checked;
 
+  if (mode === "high_cpm")
+    return HIGH_CPM.has(r.country) || r.country === "EN"; // 영어권은 대부분 고CPM
   if (mode === "kr") return r.country === "KR";
   if (mode === "us") return r.country === "US" || r.country === "EN";
   if (mode === "kr_us")
@@ -460,7 +481,8 @@ function regionLabel(r) {
   if (!r.country) return "🌐 국가 미상";
   if (r.country === "EN") return "🌐 영어권(추정)";
   const flag = FLAG[r.country] || "🌐";
-  return flag + " " + r.country + (r.guess ? "(추정)" : "");
+  const cpm = CPM[r.country] ? " · CPM $" + CPM[r.country].toFixed(2) : "";
+  return flag + " " + r.country + (r.guess ? "(추정)" : "") + cpm;
 }
 
 // ----- 렌더링 -----
@@ -568,12 +590,84 @@ $("favBtn").addEventListener("click", () => {
   setStatus(`"${q}" 즐겨찾기에 고정됨 ★`);
 });
 
+// ----- 설정·결과 기억 -----
+const SETTING_IDS = ["period", "sort", "region", "maxCount"];
+
+function updateSummary() {
+  const folded = $("filters").classList.contains("folded");
+  $("fold").textContent = folded ? "필터 ▸" : "필터 ▾";
+  const sum = $("summary");
+  sum.classList.toggle("on", folded);
+  if (folded) {
+    const txt = (id) => $(id).options[$(id).selectedIndex].textContent;
+    sum.textContent =
+      [txt("period"), txt("sort"), txt("region"), txt("maxCount")].join(" · ");
+  }
+}
+
+function saveSettings() {
+  const s = {
+    query: $("query").value,
+    incUnknown: $("incUnknown").checked,
+    folded: $("filters").classList.contains("folded"),
+  };
+  SETTING_IDS.forEach((id) => (s[id] = $(id).value));
+  localStorage.setItem("yt_settings", JSON.stringify(s));
+  updateSummary();
+}
+
+function restoreSettings() {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem("yt_settings") || "{}"); } catch (e) {}
+  SETTING_IDS.forEach((id) => {
+    const ok = s[id] != null && [...$(id).options].some((o) => o.value === s[id]);
+    if (ok) $(id).value = s[id];
+  });
+  if (typeof s.incUnknown === "boolean") $("incUnknown").checked = s.incUnknown;
+  if (s.query) $("query").value = s.query;
+  if (s.folded) $("filters").classList.add("folded");
+  updateSummary();
+}
+
+// 마지막 조회 결과를 저장해 두고 다음 접속 때 그대로 복원한다 (할당량 소모 없음)
+function saveResults() {
+  try {
+    localStorage.setItem("yt_last", JSON.stringify({
+      ts: Date.now(), rows: rows.slice(0, 150),
+    }));
+  } catch (e) { /* 용량 초과 등은 무시 */ }
+}
+
+function restoreResults() {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem("yt_last") || "null"); } catch (e) {}
+  if (!d || !Array.isArray(d.rows) || !d.rows.length) return;
+  rows = d.rows;
+  render();
+  const mins = Math.max(0, Math.round((Date.now() - d.ts) / 60000));
+  const ago = mins < 60 ? mins + "분 전" : Math.round(mins / 60) + "시간 전";
+  setStatus(`마지막 조회 결과 (${ago}) · ${visibleRows().length}개 표시 — 새로 받으려면 조회`);
+}
+
+$("fold").addEventListener("click", () => {
+  $("filters").classList.toggle("folded");
+  saveSettings();
+});
+
 // ----- 이벤트 -----
 $("go").addEventListener("click", run);
 $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
-$("sort").addEventListener("change", () => rows.length && render());
-$("region").addEventListener("change", () => rows.length && render());
-$("incUnknown").addEventListener("change", () => rows.length && render());
+// 설정을 바꾸면 즉시 저장하고, 화면에 영향 있는 항목은 다시 그린다
+["sort", "region", "incUnknown"].forEach((id) =>
+  $(id).addEventListener("change", () => {
+    saveSettings();
+    if (rows.length) render();
+  })
+);
+["period", "maxCount"].forEach((id) =>
+  $(id).addEventListener("change", saveSettings)
+);
+$("query").addEventListener("change", saveSettings);
 
 async function run() {
   const q = $("query").value.trim();
@@ -596,6 +690,8 @@ async function run() {
       rows.forEach((r) => { if (r.country === undefined) r.country = ""; });
     }
     render();
+    saveSettings();
+    saveResults();
   } catch (e) {
     setStatus(String(e.message || e), true);
   }
@@ -614,6 +710,10 @@ $("copy").addEventListener("click", async () => {
     setStatus("복사 실패 — 다시 시도해주세요", true);
   }
 });
+
+// 모든 선언이 끝난 뒤 마지막 상태를 복원한다 (선언 전에 부르면 TDZ 오류)
+restoreSettings();
+restoreResults();
 </script>
 </body>
 </html>
