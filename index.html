@@ -147,6 +147,22 @@
     font-size: 12px;
     padding: 2px;
   }
+  .chk {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--dim);
+    white-space: nowrap;
+    padding: 0 4px;
+  }
+  .chk input { width: 17px; height: 17px; accent-color: var(--accent1); }
+  .card .rg {
+    font-size: 10.5px;
+    color: var(--dim);
+    padding: 0 9px 6px;
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -194,6 +210,16 @@
       </select>
     </div>
     <div class="row mt8">
+      <select id="region">
+        <option value="all">모든 국가</option>
+        <option value="kr_us">한국 + 미국만</option>
+        <option value="no_asia">아시아 제외</option>
+        <option value="kr">한국만</option>
+        <option value="us">미국만</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="incUnknown" checked> 미상 포함</label>
+    </div>
+    <div class="row mt8">
       <select id="maxCount">
         <option value="50">50개</option>
         <option value="100" selected>100개</option>
@@ -202,7 +228,8 @@
       <button class="btn-main" id="go" style="flex:2">조회</button>
       <button class="btn-ghost" id="copy">URL 복사</button>
     </div>
-    <div class="hint">채널 조회 ≈ 할당량 3~7 · 검색어 조회 ≈ 101~103 (하루 한도 10,000)</div>
+    <div class="hint">채널 조회 ≈ 할당량 4~8 · 검색어 조회 ≈ 102~105 (하루 한도 10,000).
+      국가는 채널 등록정보 기준이며, 비어 있으면 영상 언어로 추정하거나 '미상'으로 표시됩니다.</div>
   </div>
 
   <div id="status"></div>
@@ -282,11 +309,15 @@ async function fetchVideosByIds(ids) {
     }, 1);
     for (const item of data.items || []) {
       const st = item.statistics || {};
+      const sn = item.snippet || {};
       out.push({
         id: item.id,
-        title: item.snippet?.title || "",
-        channel: item.snippet?.channelTitle || "",
-        date: (item.snippet?.publishedAt || "").slice(0, 10),
+        title: sn.title || "",
+        channel: sn.channelTitle || "",
+        channelId: sn.channelId || "",
+        lang: (sn.defaultAudioLanguage || sn.defaultLanguage || "")
+          .toLowerCase().split("-")[0],
+        date: (sn.publishedAt || "").slice(0, 10),
         views: st.viewCount != null ? Number(st.viewCount) : 0,
         likes: st.likeCount != null ? Number(st.likeCount) : null,
         comments: st.commentCount != null ? Number(st.commentCount) : null,
@@ -346,6 +377,92 @@ async function loadSearch(q, maxCount, cutoffTs) {
   return fetchVideosByIds([...new Set(ids)]);
 }
 
+// ----- 국가 판정 -----
+// 유튜브 API는 "영상의 국가"를 주지 않는다. 채널의 등록 국가(snippet.country)를
+// 1순위로 쓰고, 비어 있으면 영상 언어로 추정하며, 둘 다 없으면 '미상'으로 둔다.
+const ASIA = new Set(["KR","JP","CN","TW","HK","MO","TH","VN","ID","MY","SG","PH",
+  "IN","PK","BD","LK","NP","MM","KH","LA","BN","MN","KZ","UZ","KG","TJ","TM","AF",
+  "BT","MV","TL","AE","SA","IL","TR","IR","IQ","JO","LB","KW","QA","BH","OM","YE",
+  "SY","PS","AM","AZ","GE","CY"]);
+// 아시아권 언어 (채널 국가가 없을 때의 보조 신호)
+const ASIAN_LANGS = new Set(["ko","ja","zh","th","vi","id","ms","tl","fil","hi",
+  "bn","ta","te","mr","gu","kn","ml","pa","ur","ne","si","my","km","lo","mn","ar",
+  "he","fa","tr","kk","uz"]);
+const LANG_TO_COUNTRY = { ko: "KR", ja: "JP", zh: "CN", th: "TH", vi: "VN",
+  id: "ID", ms: "MY", hi: "IN", tr: "TR", ar: "SA", he: "IL", fa: "IR" };
+const FLAG = { KR: "🇰🇷", US: "🇺🇸", JP: "🇯🇵", CN: "🇨🇳", TW: "🇹🇼", GB: "🇬🇧",
+  IN: "🇮🇳", ID: "🇮🇩", VN: "🇻🇳", TH: "🇹🇭", PH: "🇵🇭", BR: "🇧🇷", DE: "🇩🇪",
+  FR: "🇫🇷", ES: "🇪🇸", CA: "🇨🇦", AU: "🇦🇺", RU: "🇷🇺", MX: "🇲🇽" };
+
+// 채널 국가 캐시 (할당량 절약 — 기기에 영구 저장)
+let chCache = {};
+try { chCache = JSON.parse(localStorage.getItem("yt_ch_country") || "{}"); } catch (e) {}
+
+async function attachCountries(list) {
+  const need = [...new Set(list.map((r) => r.channelId).filter(
+    (id) => id && chCache[id] === undefined))];
+  for (let i = 0; i < need.length; i += 50) {
+    const data = await api("channels", {
+      part: "snippet", id: need.slice(i, i + 50).join(","), maxResults: 50,
+    }, 1);
+    for (const it of data.items || []) {
+      chCache[it.id] = (it.snippet && it.snippet.country) || "";
+    }
+    // 응답에 없던 채널도 재조회하지 않도록 빈 값으로 기록
+    for (const id of need.slice(i, i + 50)) {
+      if (chCache[id] === undefined) chCache[id] = "";
+    }
+  }
+  localStorage.setItem("yt_ch_country", JSON.stringify(chCache));
+
+  for (const r of list) {
+    const c = chCache[r.channelId] || "";
+    if (c) {
+      r.country = c;
+      r.guess = false;
+    } else if (r.lang && LANG_TO_COUNTRY[r.lang]) {
+      r.country = LANG_TO_COUNTRY[r.lang];
+      r.guess = true;
+    } else if (r.lang === "en") {
+      r.country = "EN";   // 영어권 — 특정 국가로 확정 불가
+      r.guess = true;
+    } else {
+      r.country = "";     // 미상
+      r.guess = false;
+    }
+  }
+}
+
+function isAsian(r) {
+  if (r.country === "EN") return false;      // 영어권은 비아시아로 취급
+  if (r.country) return ASIA.has(r.country);
+  return r.lang ? ASIAN_LANGS.has(r.lang) : null; // null = 판정 불가
+}
+
+function passRegion(r) {
+  const mode = $("region").value;
+  if (mode === "all") return true;
+  const unknown = !r.country;
+  if (unknown) return $("incUnknown").checked;
+
+  if (mode === "kr") return r.country === "KR";
+  if (mode === "us") return r.country === "US" || r.country === "EN";
+  if (mode === "kr_us")
+    return r.country === "KR" || r.country === "US" || r.country === "EN";
+  if (mode === "no_asia") {
+    const a = isAsian(r);
+    return a === null ? $("incUnknown").checked : !a;
+  }
+  return true;
+}
+
+function regionLabel(r) {
+  if (!r.country) return "🌐 국가 미상";
+  if (r.country === "EN") return "🌐 영어권(추정)";
+  const flag = FLAG[r.country] || "🌐";
+  return flag + " " + r.country + (r.guess ? "(추정)" : "");
+}
+
 // ----- 렌더링 -----
 function fmt(n) {
   if (n == null || isNaN(n)) return "-";
@@ -356,18 +473,30 @@ function fmt(n) {
 }
 const erOf = (r) => (r.views > 0 && r.likes != null ? (r.likes / r.views) * 100 : null);
 
-function render() {
+function visibleRows() {
   const sortKey = $("sort").value;
   const keyFn = {
     views: (r) => r.views, likes: (r) => r.likes ?? -1,
     comments: (r) => r.comments ?? -1, er: (r) => erOf(r) ?? -1,
     date: (r) => new Date(r.date || 0).getTime(),
   }[sortKey];
-  rows.sort((a, b) => keyFn(b) - keyFn(a));
+  const list = rows.filter(passRegion);
+  list.sort((a, b) => keyFn(b) - keyFn(a));
+  return list;
+}
+
+function render() {
+  const list = visibleRows();
+  const hidden = rows.length - list.length;
+  setStatus(
+    `${list.length}개 표시` +
+    (hidden > 0 ? ` · 국가 필터로 ${hidden}개 제외됨` : "") +
+    (rows.length ? " · 정렬/필터를 바꾸면 즉시 반영됩니다" : "")
+  );
 
   const grid = $("grid");
   grid.textContent = "";
-  for (const r of rows) {
+  for (const r of list) {
     const er = erOf(r);
     const a = document.createElement("a");
     a.className = "card";
@@ -378,11 +507,12 @@ function render() {
     else if (r.comments != null && r.comments >= 300) cls = " green";
     a.innerHTML =
       `<img loading="lazy" src="https://i.ytimg.com/vi/${r.id}/mqdefault.jpg">` +
-      `<div class="t"></div><div class="ch"></div>` +
+      `<div class="t"></div><div class="ch"></div><div class="rg"></div>` +
       `<div class="stats${cls}">▶ ${fmt(r.views)} · 👍 ${fmt(r.likes)} · 💬 ${fmt(r.comments)}<br>` +
       `📅 ${r.date} · ER ${er == null ? "-" : er.toFixed(2) + "%"}</div>`;
     a.querySelector(".t").textContent = r.title;
     a.querySelector(".ch").textContent = r.channel;
+    a.querySelector(".rg").textContent = regionLabel(r);
     grid.appendChild(a);
   }
 }
@@ -442,6 +572,8 @@ $("favBtn").addEventListener("click", () => {
 $("go").addEventListener("click", run);
 $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
 $("sort").addEventListener("change", () => rows.length && render());
+$("region").addEventListener("change", () => rows.length && render());
+$("incUnknown").addEventListener("change", () => rows.length && render());
 
 async function run() {
   const q = $("query").value.trim();
@@ -456,8 +588,14 @@ async function run() {
     rows = ch ? await loadChannel(ch, maxCount, cutoffTs)
               : await loadSearch(q, maxCount, cutoffTs);
     if (cutoffTs) rows = rows.filter((r) => new Date(r.date).getTime() >= cutoffTs);
+    setStatus("국가 정보 확인 중…");
+    try {
+      await attachCountries(rows);
+    } catch (e) {
+      // 국가 조회에 실패해도 목록은 보여준다 (모두 '미상' 처리)
+      rows.forEach((r) => { if (r.country === undefined) r.country = ""; });
+    }
     render();
-    setStatus(`${rows.length}개 영상 · 정렬을 바꾸면 즉시 재정렬됩니다`);
   } catch (e) {
     setStatus(String(e.message || e), true);
   }
@@ -466,10 +604,12 @@ async function run() {
 
 $("copy").addEventListener("click", async () => {
   if (!rows.length) { setStatus("먼저 조회하세요", true); return; }
-  const text = rows.map((r) => "https://www.youtube.com/watch?v=" + r.id).join("\n");
+  const list = visibleRows();
+  if (!list.length) { setStatus("표시된 영상이 없습니다", true); return; }
+  const text = list.map((r) => "https://www.youtube.com/watch?v=" + r.id).join("\n");
   try {
     await navigator.clipboard.writeText(text);
-    setStatus(`URL ${rows.length}개 복사됨 ✓ — 다받아에 붙여넣으면 일괄 다운로드`);
+    setStatus(`URL ${list.length}개 복사됨 ✓ — 다받아에 붙여넣으면 일괄 다운로드`);
   } catch (e) {
     setStatus("복사 실패 — 다시 시도해주세요", true);
   }
