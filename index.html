@@ -114,6 +114,25 @@
     color: var(--text);
     display: block;
     border: 1px solid var(--line);
+    position: relative;
+  }
+  .card .hidebtn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgba(0, 0, 0, 0.65);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 11px;
+    padding: 4px 7px;
+    cursor: pointer;
+    opacity: 0.85;
+  }
+  /* 마우스 환경에서는 카드에 올렸을 때만 보이게 (터치에선 항상 표시) */
+  @media (hover: hover) {
+    .card .hidebtn { opacity: 0; }
+    .card:hover .hidebtn { opacity: 1; }
   }
   .card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
   .card .t {
@@ -232,6 +251,11 @@
           <option value="90">최근 90일</option>
           <option value="180">최근 180일</option>
           <option value="365">최근 1년</option>
+          <option value="730">최근 2년</option>
+          <option value="1095">최근 3년</option>
+          <option value="365~730">1년~2년 전</option>
+          <option value="365~1095">1년~3년 전</option>
+          <option value="730~1095">2년~3년 전</option>
         </select>
         <select id="sort">
           <option value="views">조회수순</option>
@@ -257,15 +281,25 @@
           <option value="250">250개</option>
           <option value="400">400개</option>
         </select>
+        <select id="minViews">
+          <option value="0">조회수 전체</option>
+          <option value="100000">10만+</option>
+          <option value="500000">50만+</option>
+          <option value="1000000">100만+</option>
+          <option value="3000000">300만+</option>
+          <option value="10000000">1000만+</option>
+        </select>
       </div>
       <label class="chk mt6"><input type="checkbox" id="incUnknown" checked> 국가 미상 포함</label>
     </div>
+    <div class="chips" id="blockedBar"></div>
   </div>
 
   <div id="status"></div>
   <div class="grid" id="grid"></div>
 </main>
 
+<script src="../key.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -289,7 +323,8 @@ function addQuota(n) {
 $("quotaUsed").textContent = quotaState().used.toLocaleString();
 
 // ----- API 키 -----
-const savedKey = localStorage.getItem("yt_api_key") || "";
+// localStorage에 없으면 ../key.js에 붙여넣어 둔 공용 키를 쓴다 (초기화 방지)
+const savedKey = localStorage.getItem("yt_api_key") || self.DABOYEO_KEY || "";
 $("apiKey").value = savedKey;
 if (!savedKey) $("settings").classList.add("open");
 $("gear").addEventListener("click", () => $("settings").classList.toggle("open"));
@@ -306,7 +341,7 @@ function setStatus(msg, isErr) {
 }
 
 async function api(path, params, cost) {
-  const key = localStorage.getItem("yt_api_key") || "";
+  const key = localStorage.getItem("yt_api_key") || self.DABOYEO_KEY || "";
   if (!key) throw new Error("API 키를 먼저 저장하세요 (우측 상단 ⚙️)");
   const qs = new URLSearchParams({ ...params, key });
   const r = await fetch(API + path + "?" + qs);
@@ -357,7 +392,8 @@ async function fetchVideosByIds(ids) {
   return out;
 }
 
-async function loadChannel(chParam, maxCount, cutoffTs) {
+// fromTs: 이보다 오래된 영상에서 중단 · toTs: 이보다 최신인 영상은 건너뜀 (구간 필터)
+async function loadChannel(chParam, maxCount, fromTs, toTs) {
   const ch = await api("channels", {
     part: "contentDetails,snippet", ...chParam,
   }, 1);
@@ -378,7 +414,8 @@ async function loadChannel(chParam, maxCount, cutoffTs) {
     let stop = false;
     for (const it of pl.items || []) {
       const ts = new Date(it.contentDetails.videoPublishedAt || 0).getTime();
-      if (cutoffTs && ts < cutoffTs) { stop = true; break; }
+      if (fromTs && ts < fromTs) { stop = true; break; }
+      if (toTs && ts > toTs) continue;
       ids.push(it.contentDetails.videoId);
       if (ids.length >= maxCount) break;
     }
@@ -398,7 +435,7 @@ const SEARCH_HINT = {
   kr:       { regionCode: "KR", relevanceLanguage: "ko" },
 };
 
-async function loadSearch(q, maxCount, cutoffTs) {
+async function loadSearch(q, maxCount, fromTs, toTs) {
   const seen = new Set(); // 페이지 간 중복이 있어도 요청한 개수를 채운다
   let pageToken = "";
   const hint = SEARCH_HINT[$("region").value] || {};
@@ -407,7 +444,11 @@ async function loadSearch(q, maxCount, cutoffTs) {
       part: "id", q, type: "video", maxResults: 50, ...hint,
       ...(pageToken ? { pageToken } : {}),
     };
-    if (cutoffTs) params.publishedAfter = new Date(cutoffTs).toISOString();
+    // 조회수순으로 볼 때는 검색 결과 자체를 조회수순으로 받는다
+    // (관련도순 상위 N개만 받아 필터링하면 인기영상을 놓친다)
+    if ($("sort").value === "views") params.order = "viewCount";
+    if (fromTs) params.publishedAfter = new Date(fromTs).toISOString();
+    if (toTs) params.publishedBefore = new Date(toTs).toISOString();
     const data = await api("search", params, 100);
     for (const it of data.items || []) {
       if (it.id && it.id.videoId) seen.add(it.id.videoId);
@@ -526,6 +567,38 @@ function regionLabel(r) {
   return flag + " " + r.country + (r.guess ? "(추정)" : "") + cpm;
 }
 
+// ----- 숨긴 채널 (기기 영구 저장: {channelId: 채널명}) -----
+let blockedCh = {};
+try { blockedCh = JSON.parse(localStorage.getItem("yt_blocked_ch") || "{}"); } catch (e) {}
+
+function saveBlockedCh() {
+  localStorage.setItem("yt_blocked_ch", JSON.stringify(blockedCh));
+  renderBlockedBar();
+}
+
+function renderBlockedBar() {
+  const bar = $("blockedBar");
+  bar.textContent = "";
+  for (const [id, name] of Object.entries(blockedCh)) {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    chip.title = "숨김 해제";
+    const label = document.createElement("span");
+    label.textContent = "🚫 " + name;
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "✕";
+    chip.appendChild(label);
+    chip.appendChild(x);
+    chip.addEventListener("click", () => {
+      delete blockedCh[id];
+      saveBlockedCh();
+      if (rows.length) render();
+    });
+    bar.appendChild(chip);
+  }
+}
+
 // ----- 렌더링 -----
 function fmt(n) {
   if (n == null || isNaN(n)) return "-";
@@ -543,7 +616,9 @@ function visibleRows() {
     comments: (r) => r.comments ?? -1, er: (r) => erOf(r) ?? -1,
     date: (r) => new Date(r.date || 0).getTime(),
   }[sortKey];
-  const list = rows.filter((r) => !isBlocked(r) && passRegion(r));
+  const minV = Number($("minViews").value) || 0;
+  const list = rows.filter((r) =>
+    !isBlocked(r) && passRegion(r) && !blockedCh[r.channelId] && r.views >= minV);
   list.sort((a, b) => keyFn(b) - keyFn(a));
   return list;
 }
@@ -551,11 +626,16 @@ function visibleRows() {
 function render() {
   const list = visibleRows();
   const blocked = rows.filter(isBlocked).length;
-  const filtered = rows.length - blocked - list.length;
+  const regionPass = rows.filter((r) => !isBlocked(r) && passRegion(r));
+  const chHidden = regionPass.filter((r) => blockedCh[r.channelId]).length;
+  const filtered = rows.length - blocked - regionPass.length;
+  const underView = regionPass.length - chHidden - list.length;
   setStatus(
     `${list.length}개 표시` +
     (rows.length ? ` (수집 ${rows.length}개` : "") +
     (filtered > 0 ? ` · 국가필터 ${filtered}` : "") +
+    (underView > 0 ? ` · 조회수미달 ${underView}` : "") +
+    (chHidden > 0 ? ` · 숨긴채널 ${chHidden}` : "") +
     (blocked > 0 ? ` · 제외국가 ${blocked}` : "") +
     (rows.length ? ")" : "")
   );
@@ -579,6 +659,20 @@ function render() {
     a.querySelector(".t").textContent = r.title;
     a.querySelector(".ch").textContent = r.channel;
     a.querySelector(".rg").textContent = regionLabel(r);
+    if (r.channelId) {
+      const hb = document.createElement("button");
+      hb.className = "hidebtn";
+      hb.textContent = "🚫";
+      hb.title = `"${r.channel}" 채널 숨기기`;
+      hb.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        blockedCh[r.channelId] = r.channel || r.channelId;
+        saveBlockedCh();
+        render();
+      });
+      a.appendChild(hb);
+    }
     grid.appendChild(a);
   }
 }
@@ -596,6 +690,17 @@ function setFavs(f) {
   renderChips();
 }
 if (getFavs() === null) setFavs(["쇼츠", "Shorts"]); // 최초 기본 칩
+
+// 기본 즐겨찾기 시드 — 기기마다 한 번만 기존 칩에 병합한다.
+// (시드 버전을 기록해 두므로, 병합 후 지운 칩이 되살아나지 않는다)
+const FAV_SEED = ["cutevideos", "Funny", "Family", "Comedy", "Love", "Reels",
+  "Couple reels", "Fathers day", "Couplegoals", "funny animals",
+  "oddly satisfying", "try not to laugh"];
+if (localStorage.getItem("yt_favs_seed") !== "1") {
+  const cur = getFavs() || [];
+  setFavs([...new Set([...cur, ...FAV_SEED])]);
+  localStorage.setItem("yt_favs_seed", "1");
+}
 
 function renderChips() {
   const favs = getFavs() || [];
@@ -635,7 +740,7 @@ $("favBtn").addEventListener("click", () => {
 });
 
 // ----- 설정·결과 기억 -----
-const SETTING_IDS = ["period", "sort", "region", "maxCount"];
+const SETTING_IDS = ["period", "sort", "region", "maxCount", "minViews"];
 
 function updateSummary() {
   const folded = $("filters").classList.contains("folded");
@@ -645,7 +750,8 @@ function updateSummary() {
   if (folded) {
     const txt = (id) => $(id).options[$(id).selectedIndex].textContent;
     sum.textContent =
-      [txt("period"), txt("sort"), txt("region"), txt("maxCount")].join(" · ");
+      [txt("period"), txt("sort"), txt("region"), txt("maxCount"),
+       txt("minViews")].join(" · ");
   }
 }
 
@@ -702,7 +808,7 @@ $("fold").addEventListener("click", () => {
 $("go").addEventListener("click", run);
 $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
 // 설정을 바꾸면 즉시 저장하고, 화면에 영향 있는 항목은 다시 그린다
-["sort", "region", "incUnknown"].forEach((id) =>
+["sort", "region", "incUnknown", "minViews"].forEach((id) =>
   $(id).addEventListener("change", () => {
     saveSettings();
     if (rows.length) render();
@@ -716,16 +822,25 @@ $("query").addEventListener("change", saveSettings);
 async function run() {
   const q = $("query").value.trim();
   if (!q) { setStatus("채널이나 검색어를 입력하세요", true); return; }
+  // period: "30" = 최근 30일, "365~1095" = 1년~3년 전 구간
   const period = $("period").value;
-  const cutoffTs = period === "all" ? null : Date.now() - Number(period) * 86400000;
+  let fromTs = null, toTs = null;
+  if (period !== "all") {
+    const [recent, older] = period.split("~").map(Number);
+    fromTs = Date.now() - (older || recent) * 86400000;
+    if (older) toTs = Date.now() - recent * 86400000;
+  }
   const maxCount = Number($("maxCount").value);
   $("go").disabled = true;
   setStatus("불러오는 중…");
   try {
     const ch = parseChannel(q);
-    rows = ch ? await loadChannel(ch, maxCount, cutoffTs)
-              : await loadSearch(q, maxCount, cutoffTs);
-    if (cutoffTs) rows = rows.filter((r) => new Date(r.date).getTime() >= cutoffTs);
+    rows = ch ? await loadChannel(ch, maxCount, fromTs, toTs)
+              : await loadSearch(q, maxCount, fromTs, toTs);
+    rows = rows.filter((r) => {
+      const ts = new Date(r.date).getTime();
+      return (!fromTs || ts >= fromTs) && (!toTs || ts <= toTs);
+    });
     setStatus("국가 정보 확인 중…");
     try {
       await attachCountries(rows);
@@ -757,6 +872,7 @@ $("copy").addEventListener("click", async () => {
 
 // 모든 선언이 끝난 뒤 마지막 상태를 복원한다 (선언 전에 부르면 TDZ 오류)
 restoreSettings();
+renderBlockedBar();
 restoreResults();
 </script>
 </body>
